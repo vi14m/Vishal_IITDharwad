@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: bill-extraction-api
+    env: docker
+    region: oregon
+    plan: free
+    
+    # Environment variables (set secrets in Render dashboard)
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: LLM_PROVIDER
+        value: gemini
+      - key: API_PORT
+        value: 8000

@@ -1,0 +1,28 @@
+*.pyc
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environment
+.env
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Testing
+.pytest_cache/
+test_response.json
+evaluation_results.json
+
+# Temp files
+*.tmp
+temp/
+*.log
+
+TRAINING_SAMPLES/*
