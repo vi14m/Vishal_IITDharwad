@@ -7,8 +7,6 @@ import tempfile
 from typing import List, Tuple, Any
 import requests
 from PIL import Image
-from PIL import Image
-from pdf2image import convert_from_bytes
 import base64
 import pypdf
 
@@ -39,19 +37,6 @@ class DocumentProcessor:
             return True
         except:
             return False
-    
-    def pdf_to_images(self, pdf_content: bytes) -> List[Image.Image]:
-        """Convert PDF to list of PIL Images"""
-        try:
-            # Convert PDF bytes to images (300 DPI for good quality)
-            images = convert_from_bytes(
-                pdf_content, 
-                dpi=300,
-                fmt='png'
-            )
-            return images
-        except Exception as e:
-            raise ValueError(f"Failed to convert PDF to images: {str(e)}")
     
     def process_document(self, url: str) -> Tuple[List[Image.Image], int]:
         """
