@@ -48,12 +48,16 @@ async def root():
 
 
 @app.post("/extract-bill-data", response_model=ExtractionResponse)
-async def extract_bill_data(request: DocumentRequest):
+async def extract_bill_data(
+    document: str = None,
+    file: UploadFile = File(None)
+):
     """
     Extract line items from a bill document
     
     Args:
-        request: DocumentRequest with document URL
+        document: Optional URL to the document (PDF or image)
+        file: Optional uploaded file (PDF or image)
     
     Returns:
         ExtractionResponse with extracted data and token usage
@@ -62,101 +66,35 @@ async def extract_bill_data(request: DocumentRequest):
         # Validate configuration
         config.validate()
         
-        # Initialize components
-        doc_processor = DocumentProcessor(timeout=config.REQUEST_TIMEOUT)
-        extraction_engine = ExtractionEngine()
-        validator = Validator()
+        # Validate that exactly one input method is provided
+        if document and file:
+            raise HTTPException(
+                status_code=400,
+                detail="Please provide either 'document' URL or 'file' upload, not both"
+            )
         
-        # Step 1: Download and process document
-        print(f"Processing document: {request.document}")
-        content, mime_type, page_count = doc_processor.process_document(request.document)
-        print(f"Document has {page_count} page(s)")
-        
-        # Step 2: Extract bill items from document
-        print("Extracting bill items...")
-        pagewise_items, token_usage = extraction_engine.extract_from_document(content, mime_type)
-        print(f"Extracted {len(pagewise_items)} page(s) with items")
-        
-        # Step 3: Validate and clean data
-        print("Validating extracted data...")
-        validation_report = validator.validate_all(pagewise_items)
-        
-        # Log validation results
-        if validation_report["warnings"]:
-            print("Warnings:")
-            for warning in validation_report["warnings"]:
-                print(f"  - {warning}")
-        
-        if validation_report["duplicates"]:
-            print(f"Found {len(validation_report['duplicates'])} potential duplicates")
-            # Remove duplicates
-            pagewise_items = validator.remove_duplicates(pagewise_items)
-            print("Duplicates removed")
-        
-        # Recalculate item count after deduplication
-        total_item_count = validator.count_total_items(pagewise_items)
-        total_amount = validator.calculate_total(pagewise_items)
-        
-        print(f"Final: {total_item_count} items, Total amount: {total_amount}")
-        
-        # Step 4: Build response
-        extraction_data = ExtractionData(
-            pagewise_line_items=pagewise_items,
-            total_item_count=total_item_count
-        )
-        
-        response = ExtractionResponse(
-            is_success=True,
-            token_usage=token_usage,
-            data=extraction_data
-        )
-        
-        return response
-        
-
-        
-    except ValueError as e:
-        # Validation or processing error
-        print(f"Validation error: {str(e)}")
-        raise HTTPException(
-            status_code=400,
-            detail=str(e)
-        )
-    
-    except Exception as e:
-        # Internal server error
-        print(f"Internal error: {str(e)}")
-        print(traceback.format_exc())
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to process document. Internal server error occurred: {str(e)}"
-        )
-
-
-@app.post("/extract-from-file", response_model=ExtractionResponse)
-async def extract_from_file(file: UploadFile = File(...)):
-    """
-    Extract line items from an uploaded bill file (PDF or Image)
-    
-    Args:
-        file: Uploaded file
-    
-    Returns:
-        ExtractionResponse with extracted data and token usage
-    """
-    try:
-        # Validate configuration
-        config.validate()
+        if not document and not file:
+            raise HTTPException(
+                status_code=400,
+                detail="Please provide either 'document' URL or 'file' upload"
+            )
         
         # Initialize components
         doc_processor = DocumentProcessor(timeout=config.REQUEST_TIMEOUT)
         extraction_engine = ExtractionEngine()
         validator = Validator()
         
-        # Step 1: Read and process file content
-        print(f"Processing uploaded file: {file.filename}")
-        content = await file.read()
-        content, mime_type, page_count = doc_processor.process_file_content(content)
+        # Step 1: Process document based on input type
+        if document:
+            # URL-based processing
+            print(f"Processing document from URL: {document}")
+            content, mime_type, page_count = doc_processor.process_document(document)
+        else:
+            # File upload processing
+            print(f"Processing uploaded file: {file.filename}")
+            content = await file.read()
+            content, mime_type, page_count = doc_processor.process_file_content(content)
+        
         print(f"Document has {page_count} page(s)")
         
         # Step 2: Extract bill items from document
@@ -216,6 +154,7 @@ async def extract_from_file(file: UploadFile = File(...)):
             status_code=500,
             detail=f"Failed to process document. Internal server error occurred: {str(e)}"
         )
+
 
 
 @app.exception_handler(HTTPException)

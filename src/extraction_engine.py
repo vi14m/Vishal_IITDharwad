@@ -73,7 +73,11 @@ class ExtractionEngine:
         """Extract token usage from Gemini response"""
         try:
             usage = TokenUsage()
-            if hasattr(response, 'usage_metadata'):
+            
+            # Debug: Print available attributes on response
+            # print(f"Debug: Response attributes: {dir(response)}")
+            
+            if hasattr(response, 'usage_metadata') and response.usage_metadata:
                 metadata = response.usage_metadata
                 usage.input_tokens = getattr(metadata, 'prompt_token_count', 0)
                 usage.output_tokens = getattr(metadata, 'candidates_token_count', 0)
@@ -82,10 +86,20 @@ class ExtractionEngine:
                 # If total not provided, calculate it
                 if usage.total_tokens == 0:
                     usage.total_tokens = usage.input_tokens + usage.output_tokens
+            else:
+                print("Warning: response.usage_metadata is None or missing")
+                # Try to get usage from result if available (sometimes different structure)
+                if hasattr(response, 'result') and hasattr(response.result, 'usage_metadata'):
+                     metadata = response.result.usage_metadata
+                     usage.input_tokens = getattr(metadata, 'prompt_token_count', 0)
+                     usage.output_tokens = getattr(metadata, 'candidates_token_count', 0)
+                     usage.total_tokens = getattr(metadata, 'total_token_count', 0)
             
             return usage
         except Exception as e:
             print(f"Warning: Could not extract token usage: {e}")
+            import traceback
+            traceback.print_exc()
             return TokenUsage()
     
     def extract_from_page(

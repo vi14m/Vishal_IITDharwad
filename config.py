@@ -23,7 +23,7 @@ class Config:
     API_PORT = int(os.getenv('API_PORT', '8001'))
     
 
-    GEMINI_MODEL = 'gemini-2.5-flash' 
+    GEMINI_MODEL = 'gemini-2.0-flash-lite' 
     TEMPERATURE = float(os.getenv('TEMPERATURE', '0.1'))
     MAX_TOKENS = int(os.getenv('MAX_TOKENS', '4096'))
     
