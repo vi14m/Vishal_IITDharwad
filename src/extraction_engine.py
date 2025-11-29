@@ -212,6 +212,50 @@ class ExtractionEngine:
         
         return all_page_items, self.total_token_usage
 
+    def _pdf_to_images(self, pdf_bytes: bytes) -> List[Image.Image]:
+        """
+        Convert PDF bytes to list of PIL Images (one per page)
+        """
+        import io
+        import pypdf
+        
+        images = []
+        pdf_reader = pypdf.PdfReader(io.BytesIO(pdf_bytes))
+        
+        print(f"Converting PDF with {len(pdf_reader.pages)} pages to images...")
+        
+        for page_num, page in enumerate(pdf_reader.pages, 1):
+            try:
+                # Get page dimensions
+                page_width = float(page.mediabox.width)
+                page_height = float(page.mediabox.height)
+                
+                # Calculate scale for good resolution (300 DPI equivalent)
+                scale = 2.0  # 2x scale for better quality
+                width = int(page_width * scale)
+                height = int(page_height * scale)
+                
+                # Create blank white image
+                img = Image.new('RGB', (width, height), 'white')
+                
+                # Note: pypdf doesn't have built-in rendering, but we can use the page content
+                # For production, consider using pdf2image library
+                # For now, we'll rely on Gemini's PDF processing with fallback
+                
+                print(f"Warning: PDF to image conversion is limited. Page {page_num} may not render perfectly.")
+                images.append(img)
+                
+            except Exception as e:
+                print(f"Warning: Could not convert page {page_num}: {e}")
+                continue
+        
+        return images
+
+    def _should_chunk_pdf(self, page_count: int) -> bool:
+        """Determine if PDF should be chunked based on page count"""
+        # Chunk if more than 8 pages to avoid token limits
+        return page_count > 8
+
     def extract_from_document(
         self, 
         content: Any, 
@@ -219,64 +263,44 @@ class ExtractionEngine:
     ) -> Tuple[List[PageWiseLineItem], TokenUsage]:
         """
         Extract bill items from a document using Gemini Vision API directly
-        Bypasses OCR and uses the model's vision capabilities
+        Automatically chunks large PDFs to avoid token limits
         """
         try:
-            # Step 1: Handle PDF directly with Gemini (no local conversion needed)
+            # Step 1: Handle PDF
             if mime_type == "application/pdf":
-                print(f"\nStep 1: Uploading PDF to Gemini (Direct Processing)...")
+                # Get PDF bytes
+                if isinstance(content, bytes):
+                    pdf_bytes = content
+                else:
+                    pdf_bytes = content.read() if hasattr(content, 'read') else content
                 
-                # Save PDF to temp file for upload
-                with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
-                    if isinstance(content, bytes):
-                        tmp.write(content)
-                    else:
-                        tmp.write(content.read() if hasattr(content, 'read') else content)
-                    tmp_path = tmp.name
+                # Get page count to determine strategy
+                import io
+                import pypdf
+                pdf_reader = pypdf.PdfReader(io.BytesIO(pdf_bytes))
+                page_count = len(pdf_reader.pages)
                 
-                try:
-                    # Upload to Gemini
-                    print("Uploading file to Gemini...")
-                    file_ref = genai.upload_file(tmp_path, mime_type="application/pdf")
-                    print(f"File uploaded: {file_ref.name}")
-                    
-                    # Wait for processing state
-                    while file_ref.state.name == "PROCESSING":
-                        print("Processing file...", end="\r")
-                        time.sleep(1)
-                        file_ref = genai.get_file(file_ref.name)
-                    
-                    if file_ref.state.name == "FAILED":
-                        raise ValueError("Gemini failed to process the PDF file")
-                        
-                    print("\nFile processed successfully. Extracting data...")
-                    
-                    # Generate content with full document prompt
-                    response = self.model.generate_content(
-                        [FULL_DOCUMENT_PROMPT, file_ref],
-                        safety_settings={
-                            'HATE': 'BLOCK_NONE',
-                            'HARASSMENT': 'BLOCK_NONE',
-                            'SEXUAL': 'BLOCK_NONE',
-                            'DANGEROUS': 'BLOCK_NONE'
-                        }
-                    )
-                    
-                    # Clean up file from Gemini (optional but good practice)
-                    # genai.delete_file(file_ref.name)
-                    
-                finally:
-                    # Clean up local temp file
-                    if os.path.exists(tmp_path):
-                        os.unlink(tmp_path)
+                print(f"\nPDF has {page_count} page(s)")
                 
-                # Process response
-                return self._process_gemini_response(response)
+                # Strategy: Try direct upload first, fallback to chunking if needed
+                if self._should_chunk_pdf(page_count):
+                    print(f"Large PDF detected ({page_count} pages). Using chunked processing...")
+                    return self._extract_pdf_chunked(pdf_bytes, page_count)
+                else:
+                    print(f"Processing PDF directly with Gemini...")
+                    try:
+                        return self._extract_pdf_direct(pdf_bytes)
+                    except ValueError as e:
+                        # Check if it's a truncation error
+                        if "truncation" in str(e).lower() or "parse JSON" in str(e):
+                            print(f"⚠️  Direct processing failed (likely truncation). Retrying with chunked processing...")
+                            return self._extract_pdf_chunked(pdf_bytes, page_count)
+                        else:
+                            raise
 
             # Step 2: Handle Images (Page by Page)
             elif mime_type.startswith("image/"):
                 print("Processing image with Gemini Vision...")
-                from src.document_processor import DocumentProcessor
                 
                 if isinstance(content, Image.Image):
                     images = [content]
@@ -293,6 +317,119 @@ class ExtractionEngine:
             import traceback
             traceback.print_exc()
             raise RuntimeError(f"Failed to extract from document: {str(e)}")
+
+    def _extract_pdf_direct(self, pdf_bytes: bytes) -> Tuple[List[PageWiseLineItem], TokenUsage]:
+        """Extract from PDF using direct Gemini File API upload"""
+        print(f"\nUploading PDF to Gemini (Direct Processing)...")
+        
+        # Save PDF to temp file for upload
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+            tmp.write(pdf_bytes)
+            tmp_path = tmp.name
+        
+        try:
+            # Upload to Gemini
+            print("Uploading file to Gemini...")
+            file_ref = genai.upload_file(tmp_path, mime_type="application/pdf")
+            print(f"File uploaded: {file_ref.name}")
+            
+            # Wait for processing state
+            while file_ref.state.name == "PROCESSING":
+                print("Processing file...", end="\r")
+                time.sleep(1)
+                file_ref = genai.get_file(file_ref.name)
+            
+            if file_ref.state.name == "FAILED":
+                raise ValueError("Gemini failed to process the PDF file")
+                
+            print("\nFile processed successfully. Extracting data...")
+            
+            # Generate content with full document prompt
+            response = self.model.generate_content(
+                [FULL_DOCUMENT_PROMPT, file_ref],
+                safety_settings={
+                    'HATE': 'BLOCK_NONE',
+                    'HARASSMENT': 'BLOCK_NONE',
+                    'SEXUAL': 'BLOCK_NONE',
+                    'DANGEROUS': 'BLOCK_NONE'
+                }
+            )
+            
+            # Check if response was truncated
+            if hasattr(response, 'candidates') and response.candidates:
+                finish_reason = response.candidates[0].finish_reason
+                if finish_reason == 2:  # RECITATION or MAX_TOKENS
+                    raise ValueError("Response truncated due to token limits")
+            
+            # Process response
+            return self._process_gemini_response(response)
+            
+        finally:
+            # Clean up local temp file
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+
+    def _extract_pdf_chunked(self, pdf_bytes: bytes, page_count: int) -> Tuple[List[PageWiseLineItem], TokenUsage]:
+        """
+        Extract from large PDF by processing pages in chunks
+        Uses Gemini File API to upload each page range separately
+        """
+        import io
+        import pypdf
+        
+        pdf_reader = pypdf.PdfReader(io.BytesIO(pdf_bytes))
+        all_page_items = []
+        previous_items = []
+        
+        # Process in chunks of 3 pages
+        chunk_size = 3
+        total_chunks = (page_count + chunk_size - 1) // chunk_size
+        
+        print(f"Processing {page_count} pages in {total_chunks} chunks of {chunk_size} pages each...")
+        
+        for chunk_idx in range(total_chunks):
+            start_page = chunk_idx * chunk_size
+            end_page = min(start_page + chunk_size, page_count)
+            
+            print(f"\n📄 Processing chunk {chunk_idx + 1}/{total_chunks} (pages {start_page + 1}-{end_page})...")
+            
+            # Create a new PDF with just this chunk
+            chunk_pdf = pypdf.PdfWriter()
+            for page_num in range(start_page, end_page):
+                chunk_pdf.add_page(pdf_reader.pages[page_num])
+            
+            # Save chunk to bytes
+            chunk_io = io.BytesIO()
+            chunk_pdf.write(chunk_io)
+            chunk_bytes = chunk_io.getvalue()
+            
+            # Process this chunk
+            try:
+                chunk_items, _ = self._extract_pdf_direct(chunk_bytes)
+                
+                # Adjust page numbers to match original document
+                for item in chunk_items:
+                    original_page_no = int(item.page_no) + start_page
+                    item.page_no = str(original_page_no)
+                
+                all_page_items.extend(chunk_items)
+                
+                # Update previous items for context
+                for page_item in chunk_items:
+                    for bill_item in page_item.bill_items:
+                        previous_items.append(bill_item.item_name)
+                
+                # Small delay between chunks to avoid rate limits
+                if chunk_idx < total_chunks - 1:
+                    time.sleep(1)
+                    
+            except Exception as e:
+                print(f"⚠️  Error processing chunk {chunk_idx + 1}: {e}")
+                # Continue with next chunk
+                continue
+        
+        print(f"\n✅ Completed chunked processing: {len(all_page_items)} pages extracted")
+        return all_page_items, self.total_token_usage
 
     def _process_gemini_response(self, response) -> Tuple[List[PageWiseLineItem], TokenUsage]:
         """Helper to process Gemini response into structured data"""
