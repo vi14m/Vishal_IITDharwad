@@ -25,7 +25,7 @@ class Config:
 
     GEMINI_MODEL = 'gemini-2.0-flash-lite' 
     TEMPERATURE = float(os.getenv('TEMPERATURE', '0.1'))
-    MAX_TOKENS = int(os.getenv('MAX_TOKENS', '4096'))
+    MAX_TOKENS = int(os.getenv('MAX_TOKENS', '8192'))
     
     # Groq Model Configuration  
     GROQ_MODEL = os.getenv('GROQ_MODEL', 'llama-3.1-8b-instant')

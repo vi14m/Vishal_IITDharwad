@@ -67,7 +67,18 @@ class ExtractionEngine:
                     return json.loads(text[start:end+1])
                 except:
                     pass
-            raise ValueError(f"Failed to parse JSON from response: {e}")
+            
+            # Provide helpful error message with context
+            error_pos = getattr(e, 'pos', 0)
+            context_start = max(0, error_pos - 100)
+            context_end = min(len(text), error_pos + 100)
+            context = text[context_start:context_end]
+            
+            print(f"ERROR: JSON parsing failed at position {error_pos}")
+            print(f"Context: ...{context}...")
+            print(f"Full response length: {len(text)} characters")
+            
+            raise ValueError(f"Failed to parse JSON from response: {e}. This may be due to response truncation. Try increasing MAX_TOKENS or simplifying the document.")
     
     def _update_token_usage(self, response) -> TokenUsage:
         """Extract token usage from Gemini response"""
