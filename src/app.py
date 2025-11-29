@@ -3,7 +3,7 @@ Bill Extraction API Server
 FastAPI application for extracting line items from medical bills
 """
 import traceback
-from fastapi import FastAPI, HTTPException, Request, UploadFile, File
+from fastapi import FastAPI, HTTPException, Request, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -49,7 +49,7 @@ async def root():
 
 @app.post("/extract-bill-data", response_model=ExtractionResponse)
 async def extract_bill_data(
-    document: str = None,
+    document: str = Form(None),
     file: UploadFile = File(None)
 ):
     """
