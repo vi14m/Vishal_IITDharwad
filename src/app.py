@@ -49,15 +49,16 @@ async def root():
 
 @app.post("/extract-bill-data", response_model=ExtractionResponse)
 async def extract_bill_data(
+    request: Request,
     document: str = Form(None),
     file: UploadFile = File(None)
 ):
     """
     Extract line items from a bill document
     
-    Args:
-        document: Optional URL to the document (PDF or image)
-        file: Optional uploaded file (PDF or image)
+    Accepts either:
+    - JSON body with 'document' field (URL to PDF/image)
+    - Multipart form data with 'file' upload
     
     Returns:
         ExtractionResponse with extracted data and token usage
@@ -66,8 +67,18 @@ async def extract_bill_data(
         # Validate configuration
         config.validate()
         
-        # Debug: Log what we received
-        print(f"DEBUG: Received document={document}, file={file}, file.filename={file.filename if file else 'None'}")
+        # Check if request is JSON
+        content_type = request.headers.get('content-type', '')
+        
+        if 'application/json' in content_type:
+            # Handle JSON request
+            body = await request.json()
+            document = body.get('document')
+            file = None
+            print(f"DEBUG: JSON request with document={document}")
+        else:
+            # Handle form data request (already parsed by Form/File)
+            print(f"DEBUG: Form request with document={document}, file={file}, file.filename={file.filename if file else 'None'}")
         
         # Properly check if file was actually uploaded
         has_file = file is not None and file.filename is not None and file.filename != ""
