@@ -66,14 +66,21 @@ async def extract_bill_data(
         # Validate configuration
         config.validate()
         
+        # Debug: Log what we received
+        print(f"DEBUG: Received document={document}, file={file}, file.filename={file.filename if file else 'None'}")
+        
+        # Properly check if file was actually uploaded
+        has_file = file is not None and file.filename is not None and file.filename != ""
+        has_document = document is not None and document != ""
+        
         # Validate that exactly one input method is provided
-        if document and file:
+        if has_document and has_file:
             raise HTTPException(
                 status_code=400,
                 detail="Please provide either 'document' URL or 'file' upload, not both"
             )
         
-        if not document and not file:
+        if not has_document and not has_file:
             raise HTTPException(
                 status_code=400,
                 detail="Please provide either 'document' URL or 'file' upload"
